@@ -1,0 +1,4 @@
+[package]
+name = "configurator"
+version = "0.1.0"
+authors = ["Wendell Smith <wackywendell@gmail.com>"]
