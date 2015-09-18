@@ -2,3 +2,7 @@
 name = "configurator"
 version = "0.1.0"
 authors = ["Wendell Smith <wackywendell@gmail.com>"]
+
+[dependencies]
+clap = "^1.4.0"
+toml = "^0.1.22"
