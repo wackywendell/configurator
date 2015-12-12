@@ -1,13 +1,15 @@
-extern crate clap;
+extern crate getopts;
 extern crate toml;
 
+use std::ffi::OsStr;
 use std::str::FromStr;
 use std::fmt::Result as FmtResult;
 use std::fmt::{Formatter,Display};
 use std::error::Error;
 use std::any::{Any,TypeId};
+use std::result;
 
-use clap::{App,Arg};
+use getopts::{HasArg,Occur,ParsingStyle};
 use toml::Value;
 
 #[derive(Debug)]
@@ -39,65 +41,85 @@ impl Error for ConfigError {
     }
 }
 
-pub struct ConfigOption<'c> {
+#[derive(Clone, PartialEq)]
+pub struct ConfigOption {
     /// TOML option name. If `None`, not allowed in TOML
-    toml_name : Option<&'c str>,
+    toml_name : String,
     /// The clap::Arg instance, for use with CLI.
     /// If `None`, not allowed in CLI options
-    arg : Option<Arg<'c, 'c, 'c, 'c, 'c, 'c>>,
+    
+    // Fields copied fro getopts::OptGroup
+    /// Short name of the option, e.g. `h` for a `-h` option
+    short_name: String,
+    /// Long name of the option, e.g. `help` for a `--help` option
+    long_name: String,
+    /// Hint for argument, e.g. `FILE` for a `-o FILE` option
+    hint: String,
+    /// Description for usage help text
+    desc: String,
+    /// Whether option has an argument
+    hasarg: HasArg,
+    /// How often it can occur
+    occur: Occur,
+    
     /// The type we expect to extract
-    typ : TypeId
+    typ : TypeId,
+    /// Default value, if present
+    default : Option<Value>
 }
 
-impl<'c> ConfigOption<'c> {
-    pub fn new<T : Any + FromStr>(arg : Arg<'c, 'c, 'c, 'c, 'c, 'c>) -> ConfigOption<'c> {
-        ConfigOption {
-            toml_name : Some(arg.name),
-            arg : Some(arg),
-            typ : TypeId::of::<T>()
-        }
-    }
-    
-    pub fn new_cli<T : Any + FromStr>(arg : Arg<'c, 'c, 'c, 'c, 'c, 'c>) -> ConfigOption<'c> {
-        ConfigOption {
-            toml_name : None,
-            arg : Some(arg),
-            typ : TypeId::of::<T>()
-        }
-    }
-    
-    pub fn new_toml<T : Any + FromStr>(name : &'c str) -> ConfigOption<'c> {
-        ConfigOption {
-            toml_name : Some(name),
-            arg : None,
-            typ : TypeId::of::<T>()
-        }
-    }
-    
-    pub fn extract_from_string<T : Any + FromStr>(&self, from : &str) -> Option<T> {
-        let out_type = TypeId::of::<T>();
-        if out_type != self.typ {return None;}
-        return T::from_str(from).ok();
-    }
+pub struct Match {
+    /// Name of the option. Will be long_name or toml_name from ConfigOption, defaulting to
+    /// long_name if both are present
+    name : String,    
+    /// Value found so far
+    value : Option<Value>,
+    /// Current value's "precedence". 0 for compiled-in-default.
+    precedence : i32
 }
 
-pub struct ConfiguratorGroup<'c> {
+pub struct Matches {
+    main : Vec<Match>,
+    groups : std::collections::HashMap<String, Vec<Match>>
+}
+
+pub struct ConfiguratorGroup {
+    pub name : String,
     /// The arguments allowed
-    pub args : Vec<ConfigOption<'c>>,
+    pub args : Vec<ConfigOption>,
     pub in_toml : bool,
     pub in_cli : bool
 }
 
-pub struct Configurator<'c> {
-    main_group : ConfiguratorGroup<'c>,
-    groups : Vec<ConfiguratorGroup<'c>>,
+pub struct Configurator {
+    main_group : ConfiguratorGroup,
+    groups : Vec<ConfiguratorGroup>,
 }
 
-impl<'c> ConfiguratorGroup<'c> {
+impl ConfiguratorGroup {
     // /// Create a group
     // pub fn new() -> ConfiguratorGroup<'c> {
     //     return ConfiguratorGroup {
     //         
     //     }
     // }
+}
+
+impl Configurator {
+    fn getopts(&self) -> getopts::Options{
+        unimplemented!();
+    }
+    
+    pub fn parse_cli<C: IntoIterator>(&self, args: C, p : ParsingStyle) -> Result<Matches, ConfigError>
+        where C::Item: AsRef<OsStr> {
+        let mut getopt_struct = self.getopts();
+        getopt_struct.parsing_style(p);
+        let parsed = getopt_struct.parse(args);
+        
+        unimplemented!();
+    }
+    
+    pub fn parse_toml(&self, ) -> Result<Matches, ConfigError> {
+        unimplemented!();
+    }
 }
