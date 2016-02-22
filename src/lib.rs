@@ -2,7 +2,7 @@ extern crate getopts;
 extern crate toml;
 
 use std::ffi::OsStr;
-// use std::str::FromStr;
+use std::str::FromStr;
 use std::fmt::Result as FmtResult;
 use std::fmt::{Formatter, Display};
 use std::error::Error;
@@ -42,6 +42,37 @@ use toml::Value;
 //         return &*self.description
 //     }
 // }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TomlType {
+    String,
+    Integer,
+    Float,
+}
+
+impl TomlType {
+    pub fn to_value(&self, s: &str) -> Result<Value, Vec<toml::ParserError>> {
+        match *self {
+            TomlType::String => Ok(Value::String(s.to_owned())),
+            TomlType::Integer => {
+                let v = Value::from_str(s);
+                match v {
+                    Ok(Value::Integer(n)) => Ok(Value::Integer(n)),
+                    Ok(wrong_type) => unimplemented!(),
+                    Err(e) => Err(e),
+                }
+            }
+            TomlType::Float => {
+                let v = Value::from_str(s);
+                match v {
+                    Ok(Value::Float(n)) => Ok(Value::Float(n)),
+                    Ok(wrong_type) => unimplemented!(),
+                    Err(e) => Err(e),
+                }
+            }
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct DuplicateKeyError {
@@ -106,6 +137,7 @@ impl From<getopts::Fail> for ConfigError {
     }
 }
 
+/// A single option, for use in either a config file or as a command-line option
 #[derive(Clone, PartialEq)]
 pub struct ConfigOption {
     /// TOML option name. If `""`, not allowed in TOML
@@ -125,11 +157,21 @@ pub struct ConfigOption {
     occur: Occur,
 
     /// The type we expect to extract
-    typ: TypeId,
+    typ: TomlType,
     /// Default value, if present
     default: Option<Value>,
 }
 
+impl ConfigOption {
+    pub fn get_name(&self) -> &str {
+        match (self.toml_name.as_ref(), self.long_name.as_ref()) {
+            (ref tname, "") => tname,
+            (_, ref long_name) => long_name,
+        }
+    }
+}
+
+/// The best "match" for an option, kept as a `toml::Value`
 pub struct Match {
     /// Value found so far
     pub value: Option<Value>,
@@ -138,6 +180,7 @@ pub struct Match {
 }
 
 /// The configuration values after parsing.
+/// Kept as a map of (Group name) -> (match name) -> Match
 pub struct Matches {
     // Group name -> match name -> match
     /// The name of the option will be long_name or toml_name from ConfigOption, defaulting to
@@ -146,6 +189,9 @@ pub struct Matches {
 }
 
 impl Matches {
+    /// Convert a list of ConfiguratorGroups into matches, with just the defaults so far.
+    /// Later, we can call `update` to include information from other sources, e.g. a config
+    /// file or from the command-line
     pub fn from_configs<C: IntoIterator>(config: C) -> Result<Matches, DuplicateKeyError>
         where C::Item: AsRef<ConfiguratorGroup>
     {
@@ -155,13 +201,7 @@ impl Matches {
             let mut map: HashMap<String, Match> = HashMap::new();
 
             for opt in &group.args {
-                let name: String = match (opt.toml_name.as_ref(), opt.long_name.as_ref()) {
-                    (ref tname, "") => {
-                        let tname_ref: &str = tname;
-                        tname_ref.to_string()
-                    } // String::clone(tname),
-                    (_, ref long_name) => long_name.to_string(),
-                };
+                let name: String = opt.get_name().to_owned();
                 let mtch = Match {
                     value: opt.default.clone(),
                     precedence: std::i32::MIN,
@@ -224,6 +264,7 @@ impl Matches {
     }
 }
 
+/// A set of options that form a configuration group, as would be found in a toml file.
 pub struct ConfiguratorGroup {
     pub name: String,
     /// The arguments allowed
@@ -232,6 +273,8 @@ pub struct ConfiguratorGroup {
     pub in_cli: bool,
 }
 
+/// A class for 1) managing what options are available and what their defaults are, and
+/// 2) which options have been found so far.
 pub struct Configurator {
     groups: Vec<ConfiguratorGroup>,
     matches: Matches,
@@ -270,7 +313,7 @@ impl Configurator {
         opts
     }
 
-    pub fn parse_cli<C: IntoIterator>(&self,
+    pub fn parse_cli<C: IntoIterator>(&mut self,
                                       args: C,
                                       p: ParsingStyle,
                                       precedence: i32)
@@ -285,13 +328,38 @@ impl Configurator {
                 continue;
             }
             for opt in &group.args {
-                unimplemented!();
+                let getopt_match_str = match parsed.opt_str(&*opt.short_name) {
+                    None => continue,
+                    Some(s) => s,
+                };
+                let value = try!(opt.typ.to_value(&*getopt_match_str));
+                self.matches.update(&*group.name, opt.get_name(), value, precedence);
             }
         }
-        unimplemented!();
+        Ok(self.matches)
     }
 
-    pub fn parse_toml(&self) -> Result<Matches, ConfigError> {
+    pub fn parse_toml_partial(&self,
+                              parsed_toml: toml::Value,
+                              precedence: i32)
+                              -> Result<Matches, ConfigError> {
+        for group in &self.groups {
+            if !group.in_toml {
+                continue;
+            }
+            for opt in &group.args {
+                let lookup_str = format!("{}.{}", group.name, opt.get_name());
+                let value = try!(parsed_toml.lookup(&*lookup_str));
+                self.matches.update(&*group.name, opt.get_name(), value, precedence);
+            }
+        }
+        Ok(self.matches)
+    }
+
+    pub fn parse_toml(&self,
+                      parsed_toml: toml::Value,
+                      precedence: i32)
+                      -> Result<Matches, ConfigError> {
         unimplemented!();
     }
 }
